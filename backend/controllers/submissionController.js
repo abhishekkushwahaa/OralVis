@@ -1,21 +1,28 @@
 const Submission = require("../models/Submission");
 const PDFDocument = require("pdfkit");
-const fs = require("fs");
-const path = require("path");
+const axios = require("axios");
+const cloudinary = require("cloudinary").v2;
+const { PassThrough } = require("stream");
 
+// Configure Cloudinary at the top of the file
+// This uses the same hardcoded keys from your other file
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// PATIENT: Create a new submission
 exports.createSubmission = async (req, res) => {
   const { name, patientId, email, note, originalImageUrl } = req.body;
-
-  if (!originalImageUrl) {
+  if (!originalImageUrl)
     return res.status(400).json({ message: "Image URL is required" });
-  }
-
   try {
     const newSubmission = new Submission({
       patient: req.user._id,
       patientInfo: { name, patientId, email },
       note,
-      originalImageUrl: originalImageUrl,
+      originalImageUrl,
     });
     const saved = await newSubmission.save();
     res.status(201).json(saved);
@@ -24,6 +31,7 @@ exports.createSubmission = async (req, res) => {
   }
 };
 
+// PATIENT: Get their own submissions
 exports.getMySubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({ patient: req.user._id }).sort({
@@ -35,6 +43,7 @@ exports.getMySubmissions = async (req, res) => {
   }
 };
 
+// ADMIN: Get all submissions
 exports.getAllSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({})
@@ -46,6 +55,7 @@ exports.getAllSubmissions = async (req, res) => {
   }
 };
 
+// ADMIN: Get a single submission by ID
 exports.getSubmissionById = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -57,12 +67,13 @@ exports.getSubmissionById = async (req, res) => {
   }
 };
 
+// ADMIN: Update submission with annotation
 exports.annotateSubmission = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
     if (submission) {
-      submission.annotationData = JSON.parse(req.body.annotationData);
-      submission.annotatedImageUrl = req.file.path.replace(/\\/g, "/"); // Standardize path
+      submission.annotationData = req.body.annotationData;
+      submission.annotatedImageUrl = req.body.annotatedImageUrl;
       submission.status = "annotated";
       const updated = await submission.save();
       res.json(updated);
@@ -74,99 +85,105 @@ exports.annotateSubmission = async (req, res) => {
   }
 };
 
+// ADMIN: Generate the final PDF report using Cloudinary
 exports.generateReport = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
-    if (!submission)
-      return res.status(404).json({ message: "Submission not found" });
+    if (!submission || !submission.annotatedImageUrl) {
+      return res
+        .status(400)
+        .json({ message: "Submission not found or not yet annotated." });
+    }
+
+    const originalImageResponse = await axios.get(submission.originalImageUrl, {
+      responseType: "arraybuffer",
+    });
+    const originalImageBuffer = Buffer.from(
+      originalImageResponse.data,
+      "binary"
+    );
+
+    const annotatedImageResponse = await axios.get(
+      submission.annotatedImageUrl,
+      { responseType: "arraybuffer" }
+    );
+    const annotatedImageBuffer = Buffer.from(
+      annotatedImageResponse.data,
+      "binary"
+    );
 
     const doc = new PDFDocument({ size: "A4", margin: 40 });
-    const reportName = `report-${submission._id}.pdf`;
-    const reportPath = path.join(__dirname, "..", "reports", reportName);
 
-    doc.pipe(fs.createWriteStream(reportPath));
+    // This function will upload our PDF stream to Cloudinary
+    const uploadPromise = new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "oralvis-reports" }, // Optional: organize PDFs in Cloudinary
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      doc.pipe(uploadStream);
 
-    doc
-      .fontSize(20)
-      .font("Helvetica-Bold")
-      .text("OralVis Healthcare - Dental Report", { align: "center" });
-    doc.moveDown(2);
-
-    doc
-      .fontSize(12)
-      .font("Helvetica-Bold")
-      .text("Patient Details", { underline: true });
-    doc.font("Helvetica").text(`Name: ${submission.patientInfo.name}`);
-    doc.text(`Patient ID: ${submission.patientInfo.patientId}`);
-    doc.text(`Submission Date: ${submission.createdAt.toLocaleDateString()}`);
-    doc.moveDown();
-
-    const imageWidth = 240;
-    const imageHeight = 200;
-    const imageY = doc.y;
-    doc.fontSize(10).font("Helvetica-Bold").text("Original Image", 50, imageY);
-    if (fs.existsSync(submission.originalImageUrl)) {
-      doc.image(submission.originalImageUrl, 50, imageY + 15, {
-        width: imageWidth,
-        height: imageHeight,
-        align: "center",
-        valign: "center",
-      });
-    } else {
-      doc.text("Original image not found.", 50, imageY + 15);
-    }
-
-    doc
-      .fontSize(10)
-      .font("Helvetica-Bold")
-      .text("Annotated Image", 310, imageY);
-    if (fs.existsSync(submission.annotatedImageUrl)) {
-      doc.image(submission.annotatedImageUrl, 310, imageY + 15, {
-        width: imageWidth,
-        height: imageHeight,
-        align: "center",
-        valign: "center",
-      });
-    } else {
-      doc.text("Annotated image not found.", 310, imageY + 15);
-    }
-
-    const findingsY = imageY + imageHeight + 30;
-    doc.y = findingsY;
-    doc.x = 40;
-    doc
-      .fontSize(12)
-      .font("Helvetica-Bold")
-      .text("Findings", { underline: true });
-    if (submission.annotationData && submission.annotationData.length > 0) {
-      const listItems = submission.annotationData.map((ann) => `${ann.label}`);
+      // Add all content to the PDF
       doc
-        .font("Helvetica")
-        .list(listItems, { bulletRadius: 2.5, textIndent: 10, indent: 20 });
-    } else {
-      doc.font("Helvetica").text("No specific annotations were made.");
-    }
-    doc.moveDown();
+        .fontSize(20)
+        .font("Helvetica-Bold")
+        .text("OralVis Healthcare - Dental Report", { align: "center" });
+      doc.moveDown(2);
+      doc
+        .fontSize(12)
+        .font("Helvetica-Bold")
+        .text("Patient Details", { underline: true });
+      doc.font("Helvetica").text(`Name: ${submission.patientInfo.name}`);
+      doc.text(`Patient ID: ${submission.patientInfo.patientId}`);
+      doc.text(`Submission Date: ${submission.createdAt.toLocaleDateString()}`);
+      doc.moveDown();
 
-    doc
-      .fontSize(12)
-      .font("Helvetica-Bold")
-      .text("Patient Notes", { underline: true });
-    doc
-      .font("Helvetica")
-      .text(submission.note || "No additional notes provided by the patient.");
+      const imageWidth = 240;
+      const imageY = doc.y;
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .text("Original Image", 50, imageY);
+      doc.image(originalImageBuffer, 50, imageY + 15, { width: imageWidth });
 
-    doc.end();
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .text("Annotated Image", 310, imageY);
+      doc.image(annotatedImageBuffer, 310, imageY + 15, { width: imageWidth });
 
-    const reportUrl = `/reports/${reportName}`;
+      const findingsY = imageY + 200 + 30;
+      doc.y = findingsY;
+      doc.x = 40;
+      doc
+        .fontSize(12)
+        .font("Helvetica-Bold")
+        .text("Findings", { underline: true });
+      if (submission.annotationData && submission.annotationData.length > 0) {
+        const listItems = submission.annotationData.map(
+          (ann) => `${ann.label}`
+        );
+        doc.font("Helvetica").list(listItems, { bulletRadius: 2.5 });
+      } else {
+        doc.font("Helvetica").text("No annotations made.");
+      }
+
+      doc.end();
+    });
+
+    const cloudinaryResult = await uploadPromise;
+    const reportUrl = cloudinaryResult.secure_url;
+
+    // Update Database with the new Cloudinary PDF URL
     submission.reportUrl = reportUrl;
     submission.status = "reported";
     await submission.save();
 
-    res.json({ message: "Report generated", reportUrl: reportUrl });
+    res.json({ message: "Report generated successfully", reportUrl });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "PDF Generation Error", error: error.message });
+    console.error("PDF Generation Error:", error);
+    res.status(500).json({ message: "Error generating PDF report." });
   }
 };

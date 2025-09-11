@@ -3,7 +3,9 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
-const { uploadthingRoute } = require("./routes/uploadthing");
+const { uploadthingRoute } = require("./routes/upload");
+
+// console.log("Is my secret loaded?", process.env.JWT_SECRET);
 
 const uploadsDir = path.join(__dirname, "uploads");
 const reportsDir = path.join(__dirname, "reports");
@@ -24,7 +26,7 @@ mongoose
   .then(() => console.log("MongoDB Connected..."))
   .catch((err) => console.error("MongoDB Connection Error:", err));
 
-app.use("/api/uploadthing", uploadthingRoute);
+app.use("/api", require("./routes/upload"));
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/submissions", require("./routes/submissions"));
 app.use("/api/admin", require("./routes/admin"));
