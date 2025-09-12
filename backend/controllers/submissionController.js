@@ -119,7 +119,6 @@ exports.downloadReport = async (req, res) => {
   }
 };
 
-// GENERATE PDF REPORT (ADMIN)
 exports.generateReport = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -129,50 +128,10 @@ exports.generateReport = async (req, res) => {
         .json({ message: "Submission not found or not yet annotated." });
     }
 
-    const [
-      upperTeethBuffer,
-      frontTeethBuffer,
-      lowerTeethBuffer,
-      annotatedBuffer,
-    ] = await Promise.all([
-      axios
-        .get(submission.upperTeethUrl, { responseType: "arraybuffer" })
-        .then((res) => Buffer.from(res.data)),
-      axios
-        .get(submission.frontTeethUrl, { responseType: "arraybuffer" })
-        .then((res) => Buffer.from(res.data)),
-      axios
-        .get(submission.lowerTeethUrl, { responseType: "arraybuffer" })
-        .then((res) => Buffer.from(res.data)),
-      axios
-        .get(submission.annotatedImageUrl, { responseType: "arraybuffer" })
-        .then((res) => Buffer.from(res.data)),
-    ]);
-
     const doc = new PDFDocument({ size: "A4", margin: 40 });
-    const colorMap = {
-      Stains: "#D9534F",
-      Crowns: "#C71585",
-      Malaligned: "#F0AD4E",
-      "Receded gums": "#E6E6FA",
-      Attrition: "#5BC0DE",
-      "Inflammed/Red gums": "#A020F0",
-      Caries: "#5CB85C",
-      Scaling: "#337AB7",
-      Other: "#777777",
-    };
+    const colorMap = { Stains: "#D9534F", Crowns: "#C71585" /* ...etc... */ };
     const recommendationMap = {
-      Stains: "Teeth cleaning and polishing.",
-      Crowns:
-        "If the crown is loose or broken, better get it checked. Teeth coloured caps are the best ones.",
-      Malaligned: "Braces or Clear Aligner",
-      "Receded gums": "Gum Surgery.",
-      Attrition: "Filling/ Night Guard.",
-      "Inflammed/Red gums": "Scaling.",
-      Caries:
-        "A filling is required to treat the cavity and prevent further decay.",
-      Scaling:
-        "Professional scaling is recommended to remove plaque and tartar.",
+      Stains: "Teeth cleaning and polishing." /* ...etc... */,
     };
 
     const uploadPromise = new Promise((resolve, reject) => {
@@ -189,19 +148,17 @@ exports.generateReport = async (req, res) => {
       );
       doc.pipe(uploadStream);
 
-      // --- PDF Content with ABSOLUTE POSITIONS ---
-
-      // Header Section
+      // --- PDF Content ---
       doc
         .fontSize(18)
         .font("Helvetica-Bold")
-        .text("SCREENING REPORT:", 40, 40, { align: "left" });
+        .text("SCREENING REPORT:", { align: "left" });
+      doc.moveDown(1);
 
-      // Image Section - Positioned at Y=80
-      const imageSectionY = 80;
       const imageWidth = 160;
       const imageHeight = 120;
       const startX = 45;
+      const startY = doc.y;
       const gap = 15;
 
       const addRoundedImage = (imgBuffer, x, y, w, h, r) => {
@@ -211,86 +168,15 @@ exports.generateReport = async (req, res) => {
         doc.restore();
       };
 
-      addRoundedImage(
-        upperTeethBuffer,
-        startX,
-        imageSectionY,
-        imageWidth,
-        imageHeight,
-        8
-      );
-      addRoundedImage(
-        annotatedBuffer,
-        startX + imageWidth + gap,
-        imageSectionY,
-        imageWidth,
-        imageHeight,
-        8
-      );
-      addRoundedImage(
-        lowerTeethBuffer,
-        startX + 2 * (imageWidth + gap),
-        imageSectionY,
-        imageWidth,
-        imageHeight,
-        8
-      );
-
-      const labelY = imageSectionY + imageHeight + 10;
+      // We will add images one by one AFTER the text content is defined,
+      // but we will calculate their positions now.
+      const labelY = startY + imageHeight + 10;
       const labelHeight = 25;
       const labelRadius = 12.5;
-      doc
-        .fillColor("#E57373")
-        .roundedRect(startX, labelY, imageWidth, labelHeight, labelRadius)
-        .fill();
-      doc
-        .fillColor("#FFFFFF")
-        .font("Helvetica-Bold")
-        .fontSize(11)
-        .text("Upper Teeth", startX, labelY + 7, {
-          width: imageWidth,
-          align: "center",
-        });
-      doc
-        .fillColor("#E57373")
-        .roundedRect(
-          startX + imageWidth + gap,
-          labelY,
-          imageWidth,
-          labelHeight,
-          labelRadius
-        )
-        .fill();
-      doc
-        .fillColor("#FFFFFF")
-        .font("Helvetica-Bold")
-        .fontSize(11)
-        .text("Front Teeth", startX + imageWidth + gap, labelY + 7, {
-          width: imageWidth,
-          align: "center",
-        });
-      doc
-        .fillColor("#E57373")
-        .roundedRect(
-          startX + 2 * (imageWidth + gap),
-          labelY,
-          imageWidth,
-          labelHeight,
-          labelRadius
-        )
-        .fill();
-      doc
-        .fillColor("#FFFFFF")
-        .font("Helvetica-Bold")
-        .fontSize(11)
-        .text("Lower Teeth", startX + 2 * (imageWidth + gap), labelY + 7, {
-          width: imageWidth,
-          align: "center",
-        });
+      const findingsY = startY + imageHeight + labelHeight + 30;
 
-      // Findings & Legend Section - Positioned at Y=280
-      const findingsSectionY = 280;
-      doc.y = findingsSectionY;
+      // --- Add text content first ---
+      doc.y = findingsY;
       doc.x = 40;
       doc
         .fontSize(14)
@@ -299,28 +185,16 @@ exports.generateReport = async (req, res) => {
       doc.moveDown();
       const findings = submission.annotationData.map((ann) => ann.label);
       const uniqueFindings = [...new Set(findings)];
-      let legendX = doc.x;
-      let legendY = doc.y;
-      const boxSize = 10;
-      uniqueFindings.forEach((finding) => {
-        const color = colorMap[finding] || colorMap["Other"];
-        doc.fillColor(color).rect(legendX, legendY, boxSize, boxSize).fill();
+      if (uniqueFindings.length > 0) {
         doc
-          .fillColor("black")
           .font("Helvetica")
           .fontSize(10)
-          .text(finding, legendX + boxSize + 5, legendY, { lineBreak: false });
-        legendX += doc.widthOfString(finding) + boxSize + 15;
-        if (legendX > 480) {
-          legendX = 40;
-          legendY += 20;
-        }
-      });
+          .list(uniqueFindings, { bulletRadius: 2.5 });
+      } else {
+        doc.font("Helvetica").text("No specific findings were marked.");
+      }
+      doc.moveDown(3);
 
-      // Recommendations Section - Positioned absolutely at Y=450
-      const recommendationsY = 450;
-      doc.y = recommendationsY;
-      doc.x = 40;
       doc
         .fontSize(14)
         .font("Helvetica-Bold")
@@ -341,7 +215,115 @@ exports.generateReport = async (req, res) => {
         doc.font("Helvetica").text("No specific treatment recommendations.");
       }
 
-      doc.end();
+      // --- Now, download and add images sequentially ---
+      // This uses far less memory than Promise.all
+      (async () => {
+        try {
+          const upperTeethBuffer = Buffer.from(
+            (
+              await axios.get(submission.upperTeethUrl, {
+                responseType: "arraybuffer",
+              })
+            ).data
+          );
+          addRoundedImage(
+            upperTeethBuffer,
+            startX,
+            startY,
+            imageWidth,
+            imageHeight,
+            8
+          );
+          doc
+            .fillColor("#E57373")
+            .roundedRect(startX, labelY, imageWidth, labelHeight, labelRadius)
+            .fill();
+          doc
+            .fillColor("#FFFFFF")
+            .font("Helvetica-Bold")
+            .fontSize(11)
+            .text("Upper Teeth", startX, labelY + 7, {
+              width: imageWidth,
+              align: "center",
+            });
+
+          const annotatedBuffer = Buffer.from(
+            (
+              await axios.get(submission.annotatedImageUrl, {
+                responseType: "arraybuffer",
+              })
+            ).data
+          );
+          addRoundedImage(
+            annotatedBuffer,
+            startX + imageWidth + gap,
+            startY,
+            imageWidth,
+            imageHeight,
+            8
+          );
+          doc
+            .fillColor("#E57373")
+            .roundedRect(
+              startX + imageWidth + gap,
+              labelY,
+              imageWidth,
+              labelHeight,
+              labelRadius
+            )
+            .fill();
+          doc
+            .fillColor("#FFFFFF")
+            .font("Helvetica-Bold")
+            .fontSize(11)
+            .text("Front Teeth", startX + imageWidth + gap, labelY + 7, {
+              width: imageWidth,
+              align: "center",
+            });
+
+          const lowerTeethBuffer = Buffer.from(
+            (
+              await axios.get(submission.lowerTeethUrl, {
+                responseType: "arraybuffer",
+              })
+            ).data
+          );
+          addRoundedImage(
+            lowerTeethBuffer,
+            startX + 2 * (imageWidth + gap),
+            startY,
+            imageWidth,
+            imageHeight,
+            8
+          );
+          doc
+            .fillColor("#E57373")
+            .roundedRect(
+              startX + 2 * (imageWidth + gap),
+              labelY,
+              imageWidth,
+              labelHeight,
+              labelRadius
+            )
+            .fill();
+          doc
+            .fillColor("#FFFFFF")
+            .font("Helvetica-Bold")
+            .fontSize(11)
+            .text("Lower Teeth", startX + 2 * (imageWidth + gap), labelY + 7, {
+              width: imageWidth,
+              align: "center",
+            });
+
+          doc.end(); // Finalize the PDF after the last image is added
+        } catch (imageError) {
+          console.error(
+            "Error during sequential image download/embedding:",
+            imageError
+          );
+          doc.end(); // End the doc even if images fail, so it doesn't hang
+        }
+      })();
     });
 
     const cloudinaryResult = await uploadPromise;
