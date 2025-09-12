@@ -70,6 +70,7 @@ const AnnotationPage = () => {
   };
 
   const handleSaveAndGenerate = async () => {
+    const API_URL = import.meta.env.VITE_API_URL;
     setIsSaving(true);
     try {
       // 1. Create the annotationData array from the checked boxes
@@ -87,10 +88,18 @@ const AnnotationPage = () => {
         annotatedImageUrl: submission.frontTeethUrl,
       };
       const config = { headers: { Authorization: `Bearer ${user.token}` } };
-      await axios.put(`/api/admin/submissions/${id}/annotate`, payload, config);
+      await axios.put(
+        `${API_URL}/api/admin/submissions/${id}/annotate`,
+        payload,
+        config
+      );
 
       // 3. Immediately trigger the report generation
-      await axios.post(`/api/admin/submissions/${id}/report`, {}, config);
+      await axios.post(
+        `${API_URL}/api/admin/submissions/${id}/report`,
+        {},
+        config
+      );
 
       alert("Findings saved and report generated successfully!");
       navigate("/admin/dashboard");
