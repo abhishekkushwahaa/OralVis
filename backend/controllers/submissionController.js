@@ -4,25 +4,37 @@ const axios = require("axios");
 const cloudinary = require("cloudinary").v2;
 const { PassThrough } = require("stream");
 
-// Configure Cloudinary using your environment variables
+// Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// CREATE SUBMISSION (Handles multiple images)
+// CREATE SUBMISSION
 exports.createSubmission = async (req, res) => {
-  const { name, patientId, email, note, originalImageUrls } = req.body;
-  if (!originalImageUrls || originalImageUrls.length === 0) {
-    return res.status(400).json({ message: "Image URLs are required" });
+  const {
+    name,
+    patientId,
+    email,
+    note,
+    upperTeethUrl,
+    frontTeethUrl,
+    lowerTeethUrl,
+  } = req.body;
+  if (!upperTeethUrl || !frontTeethUrl || !lowerTeethUrl) {
+    return res
+      .status(400)
+      .json({ message: "All three image URLs are required" });
   }
   try {
     const newSubmission = new Submission({
       patient: req.user._id,
       patientInfo: { name, patientId, email },
       note,
-      originalImageUrls,
+      upperTeethUrl,
+      frontTeethUrl,
+      lowerTeethUrl,
     });
     const saved = await newSubmission.save();
     res.status(201).json(saved);
@@ -85,7 +97,7 @@ exports.annotateSubmission = async (req, res) => {
   }
 };
 
-// DOWNLOAD REPORT (ADMIN/PATIENT)
+// DOWNLOAD REPORT
 exports.downloadReport = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -117,20 +129,27 @@ exports.generateReport = async (req, res) => {
         .json({ message: "Submission not found or not yet annotated." });
     }
 
-    // --- THIS IS THE CORRECTED LINE ---
-    const originalImageResponse = await axios.get(submission.originalImageUrl, {
-      responseType: "arraybuffer",
-    });
-    const originalImageBuffer = Buffer.from(originalImageResponse.data);
-
-    const annotatedImageResponse = await axios.get(
-      submission.annotatedImageUrl,
-      { responseType: "arraybuffer" }
-    );
-    const annotatedImageBuffer = Buffer.from(annotatedImageResponse.data);
+    const [
+      upperTeethBuffer,
+      frontTeethBuffer,
+      lowerTeethBuffer,
+      annotatedBuffer,
+    ] = await Promise.all([
+      axios
+        .get(submission.upperTeethUrl, { responseType: "arraybuffer" })
+        .then((res) => Buffer.from(res.data)),
+      axios
+        .get(submission.frontTeethUrl, { responseType: "arraybuffer" })
+        .then((res) => Buffer.from(res.data)),
+      axios
+        .get(submission.lowerTeethUrl, { responseType: "arraybuffer" })
+        .then((res) => Buffer.from(res.data)),
+      axios
+        .get(submission.annotatedImageUrl, { responseType: "arraybuffer" })
+        .then((res) => Buffer.from(res.data)),
+    ]);
 
     const doc = new PDFDocument({ size: "A4", margin: 40 });
-
     const colorMap = {
       Stains: "#D9534F",
       Crowns: "#C71585",
@@ -146,7 +165,7 @@ exports.generateReport = async (req, res) => {
       Stains: "Teeth cleaning and polishing.",
       Crowns:
         "If the crown is loose or broken, better get it checked. Teeth coloured caps are the best ones.",
-      Malaligned: "Braces or Clear Aligner.",
+      Malaligned: "Braces or Clear Aligner",
       "Receded gums": "Gum Surgery.",
       Attrition: "Filling/ Night Guard.",
       "Inflammed/Red gums": "Scaling.",
@@ -170,45 +189,109 @@ exports.generateReport = async (req, res) => {
       );
       doc.pipe(uploadStream);
 
+      // --- PDF Content with ABSOLUTE POSITIONS ---
+
+      // Header Section
       doc
         .fontSize(18)
         .font("Helvetica-Bold")
-        .text("SCREENING REPORT:", { align: "left" });
-      doc.moveDown(1);
+        .text("SCREENING REPORT:", 40, 40, { align: "left" });
 
-      const imageWidth = 240;
-      const imageHeight = 200;
-      const imageY = doc.y;
-      doc.image(originalImageBuffer, 50, imageY, {
-        width: imageWidth,
-        height: imageHeight,
-        align: "center",
-        valign: "center",
-      });
-      doc.image(annotatedImageBuffer, 310, imageY, {
-        width: imageWidth,
-        height: imageHeight,
-        align: "center",
-        valign: "center",
-      });
-      doc.moveDown(0.5);
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text("Original Image", 50 + imageWidth / 4, imageY + imageHeight + 5);
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text(
-          "Annotated Image",
-          310 + imageWidth / 4,
-          imageY + imageHeight + 5
-        );
+      // Image Section - Positioned at Y=80
+      const imageSectionY = 80;
+      const imageWidth = 160;
+      const imageHeight = 120;
+      const startX = 45;
+      const gap = 15;
 
-      const findingsY = imageY + imageHeight + 40;
-      doc.y = findingsY;
+      const addRoundedImage = (imgBuffer, x, y, w, h, r) => {
+        doc.save();
+        doc.roundedRect(x, y, w, h, r).clip();
+        doc.image(imgBuffer, x, y, { width: w });
+        doc.restore();
+      };
+
+      addRoundedImage(
+        upperTeethBuffer,
+        startX,
+        imageSectionY,
+        imageWidth,
+        imageHeight,
+        8
+      );
+      addRoundedImage(
+        annotatedBuffer,
+        startX + imageWidth + gap,
+        imageSectionY,
+        imageWidth,
+        imageHeight,
+        8
+      );
+      addRoundedImage(
+        lowerTeethBuffer,
+        startX + 2 * (imageWidth + gap),
+        imageSectionY,
+        imageWidth,
+        imageHeight,
+        8
+      );
+
+      const labelY = imageSectionY + imageHeight + 10;
+      const labelHeight = 25;
+      const labelRadius = 12.5;
+      doc
+        .fillColor("#E57373")
+        .roundedRect(startX, labelY, imageWidth, labelHeight, labelRadius)
+        .fill();
+      doc
+        .fillColor("#FFFFFF")
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .text("Upper Teeth", startX, labelY + 7, {
+          width: imageWidth,
+          align: "center",
+        });
+      doc
+        .fillColor("#E57373")
+        .roundedRect(
+          startX + imageWidth + gap,
+          labelY,
+          imageWidth,
+          labelHeight,
+          labelRadius
+        )
+        .fill();
+      doc
+        .fillColor("#FFFFFF")
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .text("Front Teeth", startX + imageWidth + gap, labelY + 7, {
+          width: imageWidth,
+          align: "center",
+        });
+      doc
+        .fillColor("#E57373")
+        .roundedRect(
+          startX + 2 * (imageWidth + gap),
+          labelY,
+          imageWidth,
+          labelHeight,
+          labelRadius
+        )
+        .fill();
+      doc
+        .fillColor("#FFFFFF")
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .text("Lower Teeth", startX + 2 * (imageWidth + gap), labelY + 7, {
+          width: imageWidth,
+          align: "center",
+        });
+
+      // Findings & Legend Section - Positioned at Y=280
+      const findingsSectionY = 280;
+      doc.y = findingsSectionY;
       doc.x = 40;
-
       doc
         .fontSize(14)
         .font("Helvetica-Bold")
@@ -227,15 +310,16 @@ exports.generateReport = async (req, res) => {
           .font("Helvetica")
           .fontSize(10)
           .text(finding, legendX + boxSize + 5, legendY, { lineBreak: false });
-        legendX += doc.widthOfString(finding) + boxSize + 30;
+        legendX += doc.widthOfString(finding) + boxSize + 15;
         if (legendX > 480) {
           legendX = 40;
           legendY += 20;
         }
       });
-      doc.moveDown(3);
 
-      doc.y = legendY + 40;
+      // Recommendations Section - Positioned absolutely at Y=450
+      const recommendationsY = 450;
+      doc.y = recommendationsY;
       doc.x = 40;
       doc
         .fontSize(14)
@@ -254,7 +338,7 @@ exports.generateReport = async (req, res) => {
           }
         });
       } else {
-        doc.font("Helvetica").text("No specific findings to report.");
+        doc.font("Helvetica").text("No specific treatment recommendations.");
       }
 
       doc.end();
