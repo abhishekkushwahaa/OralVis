@@ -9,11 +9,11 @@ const RegisterPage = () => {
   const [password, setPassword] = useState("");
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
-
+  const API_URL = import.meta.env.VITE_API_URL;
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await axios.post("/api/auth/register", {
+      const { data } = await axios.post(`${API_URL}/api/auth/register`, {
         name,
         email,
         password,

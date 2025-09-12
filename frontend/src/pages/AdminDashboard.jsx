@@ -6,12 +6,15 @@ import { AuthContext } from "../context/AuthContext.jsx";
 const AdminDashboard = () => {
   const [submissions, setSubmissions] = useState([]);
   const { user } = useContext(AuthContext);
-
+  const API_URL = import.meta.env.VITE_API_URL;
   useEffect(() => {
     const fetchSubmissions = async () => {
       try {
         const config = { headers: { Authorization: `Bearer ${user.token}` } };
-        const { data } = await axios.get("/api/admin/submissions", config);
+        const { data } = await axios.get(
+          `${API_URL}/api/admin/submissions`,
+          config
+        );
         setSubmissions(data);
       } catch (error) {
         console.error("Failed to fetch submissions", error);

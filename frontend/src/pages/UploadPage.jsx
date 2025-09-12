@@ -10,14 +10,14 @@ const ImageUploader = ({ title, onUploadComplete }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const { user } = useContext(AuthContext);
-
+  const API_URL = import.meta.env.VITE_API_URL;
   const handleUpload = async () => {
     if (!file) return;
     setIsUploading(true);
     try {
       const config = { headers: { Authorization: `Bearer ${user.token}` } };
       const { data: signData } = await axios.post(
-        "/api/sign-upload",
+        `${API_URL}/api/sign-upload`,
         {},
         config
       );
@@ -70,7 +70,7 @@ const UploadPage = () => {
   const navigate = useNavigate();
 
   const allImagesUploaded = urls.upper && urls.front && urls.lower;
-
+  const API_URL = import.meta.env.VITE_API_URL;
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!allImagesUploaded) {
@@ -88,7 +88,7 @@ const UploadPage = () => {
         lowerTeethUrl: urls.lower,
       };
       const config = { headers: { Authorization: `Bearer ${user.token}` } };
-      await axios.post("/api/submissions", submissionData, config);
+      await axios.post(`${API_URL}/api/submissions`, submissionData, config);
       navigate("/dashboard");
     } catch (error) {
       alert("Submission failed: " + error.response?.data?.message);

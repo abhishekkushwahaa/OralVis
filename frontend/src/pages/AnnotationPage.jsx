@@ -37,14 +37,14 @@ const AnnotationPage = () => {
   const [submission, setSubmission] = useState(null);
   const [checkedFindings, setCheckedFindings] = useState({});
   const [isSaving, setIsSaving] = useState(false);
-
+  const API_URL = import.meta.env.VITE_API_URL;
   useEffect(() => {
     if (user?.token) {
       const fetchSubmission = async () => {
         try {
           const config = { headers: { Authorization: `Bearer ${user.token}` } };
           const { data } = await axios.get(
-            `/api/admin/submissions/${id}`,
+            `${API_URL}/api/admin/submissions/${id}`,
             config
           );
           setSubmission(data);
