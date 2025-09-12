@@ -70,42 +70,55 @@ const AnnotationPage = () => {
   };
 
   const handleSaveAndGenerate = async () => {
-    const API_URL = import.meta.env.VITE_API_URL;
+    console.log("Save & Generate started...");
     setIsSaving(true);
+
     try {
-      // 1. Create the annotationData array from the checked boxes
       const selectedLabels = Object.keys(checkedFindings).filter(
         (key) => checkedFindings[key]
       );
+      console.log("Selected Labels:", selectedLabels);
+
       const annotationData = selectedLabels.map((label) => ({
         label,
         shape: "checkbox",
       }));
 
-      // 2. Save the findings. We'll use the front teeth image as the "annotated" image placeholder.
       const payload = {
-        annotationData: annotationData,
+        annotationData,
         annotatedImageUrl: submission.frontTeethUrl,
       };
+
       const config = { headers: { Authorization: `Bearer ${user.token}` } };
+
+      console.log("Sending annotation PUT request...");
       await axios.put(
         `${API_URL}/api/admin/submissions/${id}/annotate`,
         payload,
         config
       );
+      console.log("Annotation saved.");
 
-      // 3. Immediately trigger the report generation
-      await axios.post(
+      console.log("Sending report POST request...");
+      const reportResponse = await axios.post(
         `${API_URL}/api/admin/submissions/${id}/report`,
         {},
         config
       );
+      console.log("Report Response:", reportResponse);
 
       alert("Findings saved and report generated successfully!");
       navigate("/admin/dashboard");
     } catch (error) {
-      console.error("Failed to save and generate report:", error);
-      alert("An error occurred. Please try again.");
+      if (error.response) {
+        console.error("Error Response Data:", error.response.data);
+        console.error("Error Status:", error.response.status);
+      } else if (error.request) {
+        console.error("No response received:", error.request);
+      } else {
+        console.error("Error Message:", error.message);
+      }
+      alert("An error occurred. Check console for details.");
     } finally {
       setIsSaving(false);
     }
