@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "https://oralvis-production-eab8.up.railway.app/api/data",
+        target: "https://oralvis-production-eab8.up.railway.app",
         changeOrigin: true,
       },
     },
