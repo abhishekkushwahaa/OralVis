@@ -6,6 +6,7 @@ const {
   annotateSubmission,
   generateReport,
 } = require("../controllers/submissionController");
+
 const { protect, admin } = require("../middleware/authMiddleware");
 const upload = require("../config/multerConfig").single("image");
 
@@ -15,5 +16,4 @@ router
   .route("/submissions/:id/annotate")
   .put(protect, admin, upload, annotateSubmission);
 router.route("/submissions/:id/report").post(protect, admin, generateReport);
-
 module.exports = router;

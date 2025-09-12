@@ -1,5 +1,3 @@
-// frontend/src/pages/PatientDashboard.jsx
-
 import React, { useState, useEffect, useContext } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
@@ -55,14 +53,13 @@ const PatientDashboard = () => {
               </td>
               <td>
                 {sub.status === "reported" ? (
-                  // --- THIS IS THE CORRECTED LINE ---
                   <a
                     href={sub.reportUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="action-link"
                   >
-                    Download Report
+                    View Report
                   </a>
                 ) : (
                   "N/A"
