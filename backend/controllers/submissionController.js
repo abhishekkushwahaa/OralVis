@@ -129,9 +129,29 @@ exports.generateReport = async (req, res) => {
     }
 
     const doc = new PDFDocument({ size: "A4", margin: 40 });
-    const colorMap = { Stains: "#D9534F", Crowns: "#C71585" /* ...etc... */ };
+    const colorMap = {
+      Stains: "#D9534F",
+      Crowns: "#C71585",
+      Malaligned: "#F0AD4E",
+      "Receded gums": "#E6E6FA",
+      Attrition: "#5BC0DE",
+      "Inflammed/Red gums": "#A020F0",
+      Caries: "#5CB85C",
+      Scaling: "#337AB7",
+      Other: "#777777",
+    };
     const recommendationMap = {
-      Stains: "Teeth cleaning and polishing." /* ...etc... */,
+      Stains: "Teeth cleaning and polishing.",
+      Crowns:
+        "If the crown is loose or broken, better get it checked. Teeth coloured caps are the best ones.",
+      Malaligned: "Braces or Clear Aligner",
+      "Receded gums": "Gum Surgery.",
+      Attrition: "Filling/ Night Guard.",
+      "Inflammed/Red gums": "Scaling.",
+      Caries:
+        "A filling is required to treat the cavity and prevent further decay.",
+      Scaling:
+        "Professional scaling is recommended to remove plaque and tartar.",
     };
 
     const uploadPromise = new Promise((resolve, reject) => {
@@ -152,15 +172,12 @@ exports.generateReport = async (req, res) => {
       doc
         .fontSize(18)
         .font("Helvetica-Bold")
-        .text("SCREENING REPORT:", { align: "left" });
-      doc.moveDown(1);
-
-      const imageWidth = 160;
-      const imageHeight = 120;
-      const startX = 45;
-      const startY = doc.y;
-      const gap = 15;
-
+        .text("SCREENING REPORT:", 40, 40, { align: "left" });
+      const imageSectionY = 80;
+      const imageWidth = 160,
+        imageHeight = 120,
+        startX = 45,
+        gap = 15;
       const addRoundedImage = (imgBuffer, x, y, w, h, r) => {
         doc.save();
         doc.roundedRect(x, y, w, h, r).clip();
@@ -168,15 +185,13 @@ exports.generateReport = async (req, res) => {
         doc.restore();
       };
 
-      // We will add images one by one AFTER the text content is defined,
-      // but we will calculate their positions now.
-      const labelY = startY + imageHeight + 10;
-      const labelHeight = 25;
-      const labelRadius = 12.5;
-      const findingsY = startY + imageHeight + labelHeight + 30;
+      const labelY = imageSectionY + imageHeight + 10;
+      const labelHeight = 25,
+        labelRadius = 12.5;
+      const findingsSectionY = imageSectionY + imageHeight + labelHeight + 30;
 
-      // --- Add text content first ---
-      doc.y = findingsY;
+      // Add text content first
+      doc.y = findingsSectionY;
       doc.x = 40;
       doc
         .fontSize(14)
@@ -215,8 +230,7 @@ exports.generateReport = async (req, res) => {
         doc.font("Helvetica").text("No specific treatment recommendations.");
       }
 
-      // --- Now, download and add images sequentially ---
-      // This uses far less memory than Promise.all
+      // --- Download and add images sequentially to save memory ---
       (async () => {
         try {
           const upperTeethBuffer = Buffer.from(
@@ -229,7 +243,7 @@ exports.generateReport = async (req, res) => {
           addRoundedImage(
             upperTeethBuffer,
             startX,
-            startY,
+            imageSectionY,
             imageWidth,
             imageHeight,
             8
@@ -257,7 +271,7 @@ exports.generateReport = async (req, res) => {
           addRoundedImage(
             annotatedBuffer,
             startX + imageWidth + gap,
-            startY,
+            imageSectionY,
             imageWidth,
             imageHeight,
             8
@@ -291,7 +305,7 @@ exports.generateReport = async (req, res) => {
           addRoundedImage(
             lowerTeethBuffer,
             startX + 2 * (imageWidth + gap),
-            startY,
+            imageSectionY,
             imageWidth,
             imageHeight,
             8
@@ -315,13 +329,10 @@ exports.generateReport = async (req, res) => {
               align: "center",
             });
 
-          doc.end(); // Finalize the PDF after the last image is added
+          doc.end();
         } catch (imageError) {
-          console.error(
-            "Error during sequential image download/embedding:",
-            imageError
-          );
-          doc.end(); // End the doc even if images fail, so it doesn't hang
+          console.error("Error during image download/embedding:", imageError);
+          doc.end();
         }
       })();
     });
