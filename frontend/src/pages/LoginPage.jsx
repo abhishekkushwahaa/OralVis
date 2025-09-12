@@ -9,7 +9,7 @@ const LoginPage = () => {
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
   const API_URL = import.meta.env.VITE_API_URL;
-  console.log("API_URL:", API_URL);
+  // console.log("API_URL:", API_URL);
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
