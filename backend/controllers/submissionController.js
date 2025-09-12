@@ -4,22 +4,25 @@ const axios = require("axios");
 const cloudinary = require("cloudinary").v2;
 const { PassThrough } = require("stream");
 
+// Configure Cloudinary using your environment variables
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+// CREATE SUBMISSION (Handles multiple images)
 exports.createSubmission = async (req, res) => {
-  const { name, patientId, email, note, originalImageUrl } = req.body;
-  if (!originalImageUrl)
-    return res.status(400).json({ message: "Image URL is required" });
+  const { name, patientId, email, note, originalImageUrls } = req.body;
+  if (!originalImageUrls || originalImageUrls.length === 0) {
+    return res.status(400).json({ message: "Image URLs are required" });
+  }
   try {
     const newSubmission = new Submission({
       patient: req.user._id,
       patientInfo: { name, patientId, email },
       note,
-      originalImageUrl,
+      originalImageUrls,
     });
     const saved = await newSubmission.save();
     res.status(201).json(saved);
@@ -28,6 +31,7 @@ exports.createSubmission = async (req, res) => {
   }
 };
 
+// GET PATIENT'S SUBMISSIONS
 exports.getMySubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({ patient: req.user._id }).sort({
@@ -39,6 +43,7 @@ exports.getMySubmissions = async (req, res) => {
   }
 };
 
+// GET ALL SUBMISSIONS (ADMIN)
 exports.getAllSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({})
@@ -50,6 +55,7 @@ exports.getAllSubmissions = async (req, res) => {
   }
 };
 
+// GET SUBMISSION BY ID (ADMIN)
 exports.getSubmissionById = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -61,6 +67,7 @@ exports.getSubmissionById = async (req, res) => {
   }
 };
 
+// ANNOTATE SUBMISSION (ADMIN)
 exports.annotateSubmission = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -78,41 +85,29 @@ exports.annotateSubmission = async (req, res) => {
   }
 };
 
+// DOWNLOAD REPORT (ADMIN/PATIENT)
 exports.downloadReport = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
-
     if (!submission || !submission.reportUrl) {
-      console.log("Submission not found or reportUrl missing");
       return res.status(404).json({ message: "Report not available." });
     }
-
-    console.log("Attempting to download report from:", submission.reportUrl);
-
     const cloudinaryResponse = await axios.get(submission.reportUrl, {
       responseType: "stream",
     });
-
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="report-${submission.patientInfo.patientId}.pdf"`
     );
-
     cloudinaryResponse.data.pipe(res);
   } catch (error) {
-    console.error(
-      "Full download error details:",
-      error.response?.status,
-      error.response?.data || error.message
-    );
-    res.status(500).json({
-      message: "Failed to download report",
-      error: error.response?.data || error.message,
-    });
+    console.error("Download error:", error.message);
+    res.status(500).json({ message: "Failed to download report" });
   }
 };
 
+// GENERATE PDF REPORT (ADMIN)
 exports.generateReport = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
@@ -122,6 +117,7 @@ exports.generateReport = async (req, res) => {
         .json({ message: "Submission not found or not yet annotated." });
     }
 
+    // --- THIS IS THE CORRECTED LINE ---
     const originalImageResponse = await axios.get(submission.originalImageUrl, {
       responseType: "arraybuffer",
     });
@@ -131,10 +127,34 @@ exports.generateReport = async (req, res) => {
       submission.annotatedImageUrl,
       { responseType: "arraybuffer" }
     );
-
     const annotatedImageBuffer = Buffer.from(annotatedImageResponse.data);
 
     const doc = new PDFDocument({ size: "A4", margin: 40 });
+
+    const colorMap = {
+      Stains: "#D9534F",
+      Crowns: "#C71585",
+      Malaligned: "#F0AD4E",
+      "Receded gums": "#E6E6FA",
+      Attrition: "#5BC0DE",
+      "Inflammed/Red gums": "#A020F0",
+      Caries: "#5CB85C",
+      Scaling: "#337AB7",
+      Other: "#777777",
+    };
+    const recommendationMap = {
+      Stains: "Teeth cleaning and polishing.",
+      Crowns:
+        "If the crown is loose or broken, better get it checked. Teeth coloured caps are the best ones.",
+      Malaligned: "Braces or Clear Aligner.",
+      "Receded gums": "Gum Surgery.",
+      Attrition: "Filling/ Night Guard.",
+      "Inflammed/Red gums": "Scaling.",
+      Caries:
+        "A filling is required to treat the cavity and prevent further decay.",
+      Scaling:
+        "Professional scaling is recommended to remove plaque and tartar.",
+    };
 
     const uploadPromise = new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
@@ -151,58 +171,90 @@ exports.generateReport = async (req, res) => {
       doc.pipe(uploadStream);
 
       doc
-        .fontSize(20)
+        .fontSize(18)
         .font("Helvetica-Bold")
-        .text("OralVis Healthcare - Dental Report", { align: "center" });
-      doc.moveDown(2);
-      doc
-        .fontSize(12)
-        .font("Helvetica-Bold")
-        .text("Patient Details", { underline: true });
-      doc.font("Helvetica").text(`Name: ${submission.patientInfo.name}`);
-      doc.text(`Patient ID: ${submission.patientInfo.patientId}`);
-      doc.text(`Submission Date: ${submission.createdAt.toLocaleDateString()}`);
-      doc.moveDown();
+        .text("SCREENING REPORT:", { align: "left" });
+      doc.moveDown(1);
 
       const imageWidth = 240;
       const imageHeight = 200;
       const imageY = doc.y;
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text("Original Image", 50, imageY);
-      doc.image(originalImageBuffer, 50, imageY + 15, {
+      doc.image(originalImageBuffer, 50, imageY, {
         width: imageWidth,
         height: imageHeight,
         align: "center",
         valign: "center",
       });
-
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text("Annotated Image", 310, imageY);
-      doc.image(annotatedImageBuffer, 310, imageY + 15, {
+      doc.image(annotatedImageBuffer, 310, imageY, {
         width: imageWidth,
         height: imageHeight,
         align: "center",
         valign: "center",
       });
+      doc.moveDown(0.5);
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .text("Original Image", 50 + imageWidth / 4, imageY + imageHeight + 5);
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .text(
+          "Annotated Image",
+          310 + imageWidth / 4,
+          imageY + imageHeight + 5
+        );
 
-      const findingsY = imageY + imageHeight + 30;
+      const findingsY = imageY + imageHeight + 40;
       doc.y = findingsY;
       doc.x = 40;
+
       doc
-        .fontSize(12)
+        .fontSize(14)
         .font("Helvetica-Bold")
-        .text("Findings", { underline: true });
-      if (submission.annotationData && submission.annotationData.length > 0) {
-        const listItems = submission.annotationData.map(
-          (ann) => `${ann.label}`
-        );
-        doc.font("Helvetica").list(listItems, { bulletRadius: 2.5 });
+        .text("FINDINGS:", { underline: true });
+      doc.moveDown();
+      const findings = submission.annotationData.map((ann) => ann.label);
+      const uniqueFindings = [...new Set(findings)];
+      let legendX = doc.x;
+      let legendY = doc.y;
+      const boxSize = 10;
+      uniqueFindings.forEach((finding) => {
+        const color = colorMap[finding] || colorMap["Other"];
+        doc.fillColor(color).rect(legendX, legendY, boxSize, boxSize).fill();
+        doc
+          .fillColor("black")
+          .font("Helvetica")
+          .fontSize(10)
+          .text(finding, legendX + boxSize + 5, legendY, { lineBreak: false });
+        legendX += doc.widthOfString(finding) + boxSize + 30;
+        if (legendX > 480) {
+          legendX = 40;
+          legendY += 20;
+        }
+      });
+      doc.moveDown(3);
+
+      doc.y = legendY + 40;
+      doc.x = 40;
+      doc
+        .fontSize(14)
+        .font("Helvetica-Bold")
+        .text("TREATMENT RECOMMENDATIONS:", { underline: true });
+      doc.moveDown();
+      if (uniqueFindings.length > 0) {
+        uniqueFindings.forEach((finding) => {
+          if (recommendationMap[finding]) {
+            doc.font("Helvetica-Bold").fontSize(11).text(`• ${finding}:`);
+            doc
+              .font("Helvetica")
+              .fontSize(10)
+              .text(recommendationMap[finding], { indent: 20 });
+            doc.moveDown(0.5);
+          }
+        });
       } else {
-        doc.font("Helvetica").text("No annotations made.");
+        doc.font("Helvetica").text("No specific findings to report.");
       }
 
       doc.end();
@@ -214,7 +266,6 @@ exports.generateReport = async (req, res) => {
     submission.reportUrl = reportUrl;
     submission.status = "reported";
     await submission.save();
-
     res.json({ message: "Report generated successfully", reportUrl });
   } catch (error) {
     console.error("PDF Generation Error:", error);
